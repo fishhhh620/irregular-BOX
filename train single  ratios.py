@@ -18,7 +18,7 @@ import time
 import numpy as np
 
 from parameter_irregular import *
-from network import ImprovedA3CNet
+from network_irregular import IrregularA3CNet as ImprovedA3CNet
 from data_loader import (generate_training_episodes_from_excel,
                          ensure_save_directory, get_labeled_episode_ids)
 from worker import SupervisedWorkerAgent

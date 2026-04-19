@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 from parameter_irregular import CONTAINER_SIZE, SAVE_DIR, DATA_SCALE, LOOKAHEAD_K
-from network import ImprovedA3CNet
+from network_irregular import IrregularA3CNet as ImprovedA3CNet
 from data_loader import load_excel_data
 from test_model import ModelTesterWithLookahead
 

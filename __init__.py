@@ -1,11 +1,11 @@
 """
 A3C 装箱算法模块
 """
-from item_and_container import Item, MetaBox, ImprovedContainer
+from item_and_container_irregular import Item, MetaBox, IrregularContainer
 from reward_calculator import RewardCalculator
-from state_encoder import StateEncoder
-from network import ImprovedA3CNet
-from environment import SupervisedBinPackingEnv
+from state_encoder_irregular import IrregularStateEncoder
+from network_irregular import IrregularA3CNet
+from environment_irregular import IrregularBinPackingEnv
 from model_saver import ModelSaver
 from worker import SupervisedWorkerAgent
 from data_loader import (
@@ -18,11 +18,11 @@ from data_loader import (
 from parameter_irregular import *
 
 __all__ = [
-    'Item', 'MetaBox', 'ImprovedContainer',
+    'Item', 'MetaBox', 'IrregularContainer',
     'RewardCalculator',
-    'StateEncoder',
-    'ImprovedA3CNet',
-    'SupervisedBinPackingEnv',
+    'IrregularStateEncoder',
+    'IrregularA3CNet',
+    'IrregularBinPackingEnv',
     'ModelSaver',
     'SupervisedWorkerAgent',
     'load_excel_data',
@@ -31,4 +31,3 @@ __all__ = [
     'ensure_save_directory',
     'OnlineItemIterator',
 ]
-

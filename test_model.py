@@ -55,18 +55,18 @@ import matplotlib.colors as mcolors
 
 try:
     from parameter_irregular import CONTAINER_SIZE, SAVE_MODEL_PATH, EXCEL_FILE, DATA_SCALE, LOOKAHEAD_K
-    from network import ImprovedA3CNet
-    from environment import SupervisedBinPackingEnv
-    from item_and_container import Item
+    from network_irregular import IrregularA3CNet as ImprovedA3CNet
+    from environment_irregular import IrregularBinPackingEnv as SupervisedBinPackingEnv
+    from item_and_container_irregular import Item
     from data_loader import load_excel_data, extract_episode_data_corrected
 except ImportError:
     import sys
     import os
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from parameter_irregular import CONTAINER_SIZE, SAVE_MODEL_PATH, EXCEL_FILE, DATA_SCALE, LOOKAHEAD_K
-    from network import ImprovedA3CNet
-    from environment import SupervisedBinPackingEnv
-    from item_and_container import Item
+    from network_irregular import IrregularA3CNet as ImprovedA3CNet
+    from environment_irregular import IrregularBinPackingEnv as SupervisedBinPackingEnv
+    from item_and_container_irregular import Item
     from data_loader import load_excel_data, extract_episode_data_corrected
 
 

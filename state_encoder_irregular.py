@@ -126,7 +126,7 @@ class IrregularStateEncoder:
           [1]   : 已放置货物数（归一化）
           [2-4] : 归一化重心坐标 CG_x/L, CG_y/W, CG_z/H
           [5]   : 重心安全偏差 |CG_y/W - CG_safe_y|（第三章新增）
-          [6-9] : 集装器类型 one-hot 编码 T（4维）
+          [6-8] : 集装器类型 one-hot 编码 T（4维，共索引6~9）
         """
         # 利用率：分母为 valid_volume（合法可用体积）
         utilization = container.volume_used / container.valid_volume
