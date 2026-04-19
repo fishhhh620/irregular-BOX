@@ -3,7 +3,7 @@
 在原 state_encoder.py 基础上改动两处：
   1. global_features 增加重心安全偏差 |CG_y - CG_safe| / W（第三章式3-63）
   2. encode_state 输出中增加 contour_mask 编码（供网络使用）
-  3. _encode_global_features 输出从5维扩展为9维（加入4维集装器类型one-hot）
+  3. _encode_global_features 输出从5维扩展为10维（加入重心偏差1维 + 集装器类型one-hot 4维）
 """
 import numpy as np
 import torch
@@ -121,12 +121,12 @@ class IrregularStateEncoder:
 
     def _encode_global_features(self, container: IrregularContainer):
         """
-        全局特征（9维）：
+        全局特征（10维）：
           [0]   : 空间利用率 ρ（以valid_volume为分母）
           [1]   : 已放置货物数（归一化）
           [2-4] : 归一化重心坐标 CG_x/L, CG_y/W, CG_z/H
           [5]   : 重心安全偏差 |CG_y/W - CG_safe_y|（第三章新增）
-          [6-8] : 集装器类型 one-hot 编码 T（4维，共索引6~9）
+          [6-9] : 集装器类型 one-hot 编码 T（4维）
         """
         # 利用率：分母为 valid_volume（合法可用体积）
         utilization = container.volume_used / container.valid_volume
@@ -149,7 +149,7 @@ class IrregularStateEncoder:
         features.extend(normalized_cog)          # 3维
         features.append(cg_deviation)            # 1维（新增）
         features = np.array(features, dtype=np.float32)
-        features = np.concatenate([features, type_onehot])  # 总计9维
+        features = np.concatenate([features, type_onehot])  # 总计10维
 
         return features
 
