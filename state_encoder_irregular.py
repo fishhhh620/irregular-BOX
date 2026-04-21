@@ -38,7 +38,7 @@ class IrregularStateEncoder:
         candidate_features = self._encode_candidates(container)
         item_features      = self._encode_current_item(current_item)
         remaining_features = self._encode_remaining_items(remaining_items)
-        global_features    = self._encode_global_features(container)   # 现在是9维
+        global_features    = self._encode_global_features(container)   # 10维
         height_map         = self._create_height_map(container)
         lookahead_features = self._encode_lookahead_items(lookahead_items or [])
 
@@ -121,7 +121,7 @@ class IrregularStateEncoder:
 
     def _encode_global_features(self, container: IrregularContainer):
         """
-        全局特征（9维）：
+        全局特征（10维）：
           [0]   : 空间利用率 ρ（以valid_volume为分母）
           [1]   : 已放置货物数（归一化）
           [2-4] : 归一化重心坐标 CG_x/L, CG_y/W, CG_z/H

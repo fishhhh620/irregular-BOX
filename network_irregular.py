@@ -50,12 +50,11 @@ class IrregularA3CNet(nn.Module):
             nn.Linear(4 * K_MAX, 64), nn.ReLU()
         )
 
-        # ── 唯一改动：输入维度 5 → 9 ──────────────────────────────
+        # ── 唯一改动：输入维度 5 → 10 ─────────────────────────────
         # 原版：利用率1 + 件数1 + CG_xyz 3 = 5维
         # 新版：利用率1 + 件数1 + CG_xyz 3 + CG偏差1 + 类型one-hot 4 = 10维
-        # 注：state_encoder_irregular 输出9维（含件数归一化）实际是9维
         self.global_encoder = nn.Sequential(
-            nn.Linear(9, 32), nn.ReLU()
+            nn.Linear(10, 32), nn.ReLU()
         )
         # ─────────────────────────────────────────────────────────────
 
