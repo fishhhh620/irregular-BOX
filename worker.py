@@ -205,7 +205,7 @@ class SupervisedWorkerAgent(mp.Process):
                     continue
 
                 item_iterator = OnlineItemIterator(items_data, optimal_placements, action_targets)
-                env = SupervisedBinPackingEnv(CONTAINER_SIZE, optimal_placements)
+                env = SupervisedBinPackingEnv(CONTAINER_TYPE, optimal_placements)
                 env.reset()
 
                 buf_s, buf_a, buf_r       = [], [], []
