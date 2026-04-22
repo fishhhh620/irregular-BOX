@@ -4,9 +4,16 @@
 监督比例含义：
   该比例的 episode 使用专家位置标签（NLL Loss 向专家位置靠拢）
   其余 episode 使用纯 RL（标准 A3C Loss）
+
+用法：
+  python train.py                  # 依次训练全部四类集装器，每类跑 0%~100% 监督比例
+  python train.py pmc_md11f_md     # 仅训练指定集装器（子进程模式，主进程内部调用）
 """
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+import re
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -23,6 +30,32 @@ from data_loader import (generate_training_episodes_from_excel,
                          ensure_save_directory, get_labeled_episode_ids)
 from worker import SupervisedWorkerAgent
 from model_saver import ModelSaver
+
+# 四类集装器（与 parameter_irregular.py 中定义的一致）
+CONTAINER_TYPES = ['AKE', 'pmc_F_ld', 'pmc_md11f_md', 'pge_md11f_md']
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARAM_FILE = os.path.join(_SCRIPT_DIR, 'parameter_irregular.py')
+
+
+# ======================================================================
+#  参数文件临时替换工具（与 train_all_containers_ratio0.py 相同）
+# ======================================================================
+
+def _read_param_file():
+    with open(_PARAM_FILE, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def _write_param_file(content):
+    with open(_PARAM_FILE, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+def _patch_container_type(original_content, container_type):
+    return re.sub(
+        r"^(CONTAINER_TYPE\s*=\s*)'[^']*'",
+        rf"\g<1>'{container_type}'",
+        original_content,
+        flags=re.MULTILINE,
+    )
 
 
 # ======================================================================
@@ -276,44 +309,128 @@ def _save_summary(all_stats):
 # ======================================================================
 
 if __name__ == '__main__':
-    print("A3C 三维装箱训练  —  0%~100% 监督比例对比实验")
+
+    # ── 子进程模式：由主进程带集装器类型参数调用 ──────────────────────
+    # 例：python train.py pmc_md11f_md
+    # 此时 parameter_irregular.py 已被主进程替换为该集装器的配置，
+    # 直接执行当前配置集装器的全比例训练即可。
+    if len(sys.argv) == 2 and sys.argv[1] in CONTAINER_TYPES:
+        from test import test_excel_data_loading_corrected
+        if not test_excel_data_loading_corrected():
+            print("数据加载失败，请检查 Excel 文件和配置")
+            sys.exit(1)
+
+        if not ensure_save_directory(SAVE_DIR):
+            print("无法创建保存目录，训练终止")
+            sys.exit(1)
+
+        try:
+            episode_assignments, excel_data = generate_training_episodes_from_excel(
+                EXCEL_FILE, DATA_SCALE, NUM_PROCESSES
+            )
+            all_episode_ids = [ep for eps in episode_assignments for ep in eps]
+            print(f"\n数据加载完成：共 {len(all_episode_ids)} 个 episodes")
+        except Exception as e:
+            print(f"读取 Excel 数据失败: {e}")
+            sys.exit(1)
+
+        mp.set_start_method('spawn', force=True)
+
+        ratios    = [round(i / 10, 1) for i in range(11)]
+        all_stats = []
+        t_total   = time.time()
+
+        print(f"\n即将依次训练 {len(ratios)} 组实验：")
+        print("  " + "  ".join(f"{int(r*100)}%" for r in ratios))
+
+        for ratio in ratios:
+            stats = train_one_ratio(episode_assignments, excel_data, all_episode_ids, ratio)
+            all_stats.append(stats)
+
+        elapsed = int(time.time() - t_total)
+        h, rem  = divmod(elapsed, 3600)
+        m, sec  = divmod(rem, 60)
+        print(f"\n所有实验完成，总耗时 {h}h {m}m {sec}s")
+
+        _save_summary(all_stats)
+        sys.exit(0)
+
+    # ── 主进程模式：依次为四类集装器启动子进程 ─────────────────────────
+    import subprocess
+
+    print("A3C 三维装箱训练  —  四类集装器 × 0%~100% 监督比例对比实验")
+    print("=" * 60)
+    print(f"  集装器列表: {CONTAINER_TYPES}")
+    print(f"  监督比例  : 0%, 10%, ..., 100%（共 11 组）")
     print("=" * 60)
 
-    from test import test_excel_data_loading_corrected
-    if not test_excel_data_loading_corrected():
-        print("数据加载失败，请检查 Excel 文件和配置")
-        exit(1)
-
-    if not ensure_save_directory(SAVE_DIR):
-        print("无法创建保存目录，训练终止")
-        exit(1)
+    original_content = _read_param_file()
+    all_container_stats = {}   # {container_type: stats_or_None}
+    t_total = time.time()
 
     try:
-        episode_assignments, excel_data = generate_training_episodes_from_excel(
-            EXCEL_FILE, DATA_SCALE, NUM_PROCESSES
-        )
-        all_episode_ids = [ep for eps in episode_assignments for ep in eps]
-        print(f"\n数据加载完成：共 {len(all_episode_ids)} 个 episodes")
-    except Exception as e:
-        print(f"读取 Excel 数据失败: {e}")
-        exit(1)
+        for ctype in CONTAINER_TYPES:
+            print(f"\n{'═'*60}")
+            print(f"  开始训练集装器: {ctype}")
+            print(f"{'═'*60}")
 
-    mp.set_start_method('spawn', force=True)
+            patched = _patch_container_type(original_content, ctype)
+            _write_param_file(patched)
 
-    ratios    = [round(i / 10, 1) for i in range(11)]   # 0.0, 0.1, ..., 1.0
-    all_stats = []
-    t_total   = time.time()
+            proc = subprocess.run(
+                [sys.executable, __file__, ctype],
+                cwd=_SCRIPT_DIR,
+            )
 
-    print(f"\n即将依次训练 {len(ratios)} 组实验：")
-    print("  " + "  ".join(f"{int(r*100)}%" for r in ratios))
+            if proc.returncode != 0:
+                print(f"  [{ctype}] 子进程异常退出 (code={proc.returncode})")
+                all_container_stats[ctype] = None
+                continue
 
-    for ratio in ratios:
-        stats = train_one_ratio(episode_assignments, excel_data, all_episode_ids, ratio)
-        all_stats.append(stats)
+            # 从该集装器的汇总文件中读回最优比例的结果，用于跨容器汇总
+            summary_txt = os.path.join(
+                _SCRIPT_DIR, f'models_irregular_{ctype}', 'all_ratios_summary.txt'
+            )
+            cstats = {'container_type': ctype}
+            if os.path.exists(summary_txt):
+                with open(summary_txt, encoding='utf-8') as f:
+                    txt = f.read()
+                # 取装载率最高的那一行
+                best_util = 0.0
+                for line in txt.splitlines():
+                    m = re.search(r'(\d+\.\d+)%', line)
+                    if m:
+                        val = float(m.group(1)) / 100.0
+                        if val > best_util:
+                            best_util = val
+                            cstats['avg_utilization'] = val
+                            # 尝试提取同行的其他字段
+                            nums = re.findall(r'[-\d]+\.\d+', line)
+                            if len(nums) >= 3:
+                                cstats['avg_reward_last50'] = float(nums[1])
+                                cstats['max_reward']        = float(nums[2])
+            all_container_stats[ctype] = cstats
 
-    elapsed = int(time.time() - t_total)
-    h, rem  = divmod(elapsed, 3600)
-    m, sec  = divmod(rem, 60)
-    print(f"\n所有实验完成，总耗时 {h}h {m}m {sec}s")
+    finally:
+        _write_param_file(original_content)
+        print(f"\n  parameter_irregular.py 已恢复原始配置（{CONTAINER_TYPE}）")
 
-    _save_summary(all_stats)
+    elapsed    = int(time.time() - t_total)
+    h, rem     = divmod(elapsed, 3600)
+    m_tot, sec = divmod(rem, 60)
+    print(f"\n  全部集装器训练完成，总耗时 {h}h {m_tot}m {sec}s")
+
+    # 打印跨容器最终汇总
+    valid = [s for s in all_container_stats.values() if s is not None]
+    if valid:
+        sep = "=" * 70
+        print(f"\n{sep}")
+        print("  四类集装器  全监督比例  最优装载率汇总")
+        print(sep)
+        for s in valid:
+            util_str = f"{s.get('avg_utilization', 0)*100:.2f}%" if 'avg_utilization' in s else 'N/A'
+            print(f"  {s['container_type']:<20} 最优装载率: {util_str}")
+        best = max(valid, key=lambda s: s.get('avg_utilization', 0))
+        print(sep)
+        print(f"  最优集装器 → {best['container_type']}  "
+              f"（装载率 {best.get('avg_utilization', 0)*100:.2f}%）")
