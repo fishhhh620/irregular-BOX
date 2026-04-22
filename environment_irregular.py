@@ -75,9 +75,26 @@ class IrregularBinPackingEnv:
         """
         结束当前 episode，计算终端奖励。
         ── 改动2：分母改为 valid_volume（合法可用体积）──
+        终端奖励大幅提升，并加入阶梯式利用率激励：
+          - 基础项：150.0 * util（原50.0，提升3倍）
+          - 超过65%加成：+30
+          - 超过70%加成：+50
+          - 超过75%加成：+80
+          - 超过80%加成：+120
+        这使得提升利用率有更强的边际激励。
         """
         final_utilization = self.container.volume_used / self.container.valid_volume
-        terminal_bonus    = 50.0 * final_utilization
+        terminal_bonus    = 150.0 * final_utilization
+
+        if final_utilization >= 0.80:
+            terminal_bonus += 120.0
+        elif final_utilization >= 0.75:
+            terminal_bonus += 80.0
+        elif final_utilization >= 0.70:
+            terminal_bonus += 50.0
+        elif final_utilization >= 0.65:
+            terminal_bonus += 30.0
+
         return terminal_bonus
 
     def get_valid_actions(self):

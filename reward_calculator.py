@@ -17,27 +17,27 @@ class RewardCalculator:
 
         reward = 0.0
 
-        # 1. 体积利用率增量奖励 (核心奖励)
+        # 1. 体积利用率增量奖励 (核心奖励，权重提升)
         current_utilization = container.volume_used / container.volume_capacity
         utilization_improvement = current_utilization - self.prev_utilization
-        reward += 15.0 * utilization_improvement
+        reward += 25.0 * utilization_improvement
         self.prev_utilization = current_utilization
 
-        # 2. 紧密性奖励
+        # 2. 紧密性奖励 (权重降低，避免分散优化目标)
         compactness_score = self._calculate_compactness(container, item)
-        reward += 3.0 * compactness_score
+        reward += 1.0 * compactness_score
 
-        # 3. 高度惩罚 (保留)
+        # 3. 高度惩罚 (权重降低，减少对装载率优化的干扰)
         height_penalty = item.position[2] / container.H
-        reward -= 2.0 * height_penalty
+        reward -= 0.5 * height_penalty
 
-        # 4. 边缘利用奖励
+        # 4. 边缘利用奖励 (权重降低)
         edge_bonus = self._calculate_edge_bonus(container, item)
-        reward += 2.0 * edge_bonus
+        reward += 0.5 * edge_bonus
 
-        # 5. 稳定性奖励 (保留)
+        # 5. 稳定性奖励 (权重降低)
         stability_bonus = self._calculate_stability_bonus(container, item)
-        reward += 1.0 * stability_bonus
+        reward += 0.5 * stability_bonus
 
         return reward
 
