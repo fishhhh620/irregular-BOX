@@ -18,6 +18,7 @@ import sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import torch
 import torch.optim as optim
 import torch.multiprocessing as mp
@@ -137,7 +138,166 @@ def train_one_ratio(episode_assignments, excel_data, all_episode_ids, supervised
     _save_curve(results, ratio_pct, ratio_dir)
     _save_ratio_result(stats, ratio_dir)
     _print_stats(stats)
+
+    # 装载图：用训练好的模型跑一个贪心评估 episode 并可视化
+    try:
+        eval_container = _run_eval_episode(model_path, excel_data, all_episode_ids[0])
+        _save_loading_diagram(eval_container, ratio_pct, ratio_dir)
+    except Exception as e:
+        print(f"  [装载图] 生成失败: {e}")
+
     return stats
+
+
+# ======================================================================
+#  装载图：评估 episode + 3D 可视化
+# ======================================================================
+
+def _run_eval_episode(model_path, excel_data, episode_id):
+    """用训练好的模型贪心地跑一个 episode，返回装载后的容器对象。"""
+    from data_loader import extract_episode_data_corrected, OnlineItemIterator
+    from environment_irregular import IrregularBinPackingEnv
+
+    try:
+        net = ImprovedA3CNet(CONTAINER_SIZE)
+        state_dict = torch.load(model_path, map_location='cpu')
+        net.load_state_dict(state_dict)
+        net.eval()
+    except Exception as e:
+        print(f"  [装载图] 模型加载失败: {e}")
+        return None
+
+    try:
+        items_data, _, _ = extract_episode_data_corrected(excel_data, episode_id)
+    except Exception as e:
+        print(f"  [装载图] 数据提取失败: {e}")
+        return None
+
+    if not items_data:
+        return None
+
+    item_iterator = OnlineItemIterator(items_data, [], [])
+    env = IrregularBinPackingEnv(CONTAINER_TYPE, [])
+    env.reset()
+
+    L, W, H = CONTAINER_SIZE
+
+    while item_iterator.has_next():
+        result = item_iterator.get_next_item()
+        if result is None:
+            break
+        item_data, _, _ = result
+
+        k = max(1, min(LOOKAHEAD_K, K_MAX))
+        lah = item_iterator.peek_next_items(max(0, k - 1))
+        state = env.add_item(item_data, lah)
+        if state is None:
+            continue
+
+        valid_actions = env.get_valid_actions()
+        if not valid_actions:
+            continue
+
+        s_tensor = {
+            'occupancy_multiscale': {
+                'quarter': torch.FloatTensor(state['occupancy_multiscale']['quarter']).unsqueeze(0)
+            },
+            'candidates':      torch.FloatTensor(state['candidates']).unsqueeze(0),
+            'current_item':    torch.FloatTensor(state['current_item']).unsqueeze(0),
+            'remaining_items': torch.FloatTensor(state['remaining_items']).unsqueeze(0),
+            'global_features': torch.FloatTensor(state['global_features']).unsqueeze(0),
+            'height_map':      torch.FloatTensor(state['height_map']).unsqueeze(0),
+            'lookahead_items': torch.FloatTensor(state['lookahead_items']).unsqueeze(0),
+        }
+
+        feats = []
+        for pos, rot in valid_actions:
+            x, y, z = pos
+            feats.append([x / max(L - 1, 1),
+                          y / max(W - 1, 1),
+                          z / max(H - 1, 1),
+                          rot / 5.0])
+        action_feats = torch.FloatTensor(feats)
+
+        with torch.no_grad():
+            fused  = net.encode_state(s_tensor)
+            scores = net.score_actions(fused, action_feats)
+
+        best_idx = scores.argmax().item()
+        env.step(valid_actions[best_idx])
+
+    return env.container
+
+
+def _save_loading_diagram(container, ratio_pct, ratio_dir):
+    """将容器装载结果渲染为 3D 装载图并保存到 ratio_dir。"""
+    if container is None or not container.items:
+        print(f"  [装载图] 无已放置货物，跳过")
+        return
+
+    L, W, H   = container.L, container.W, container.H
+    num_items = len(container.items)
+
+    fig = plt.figure(figsize=(14, 9))
+    ax  = fig.add_subplot(111, projection='3d')
+
+    try:
+        cmap = plt.colormaps['tab20']
+    except (AttributeError, KeyError):
+        cmap = plt.cm.get_cmap('tab20')
+    colors = [cmap(i % 20) for i in range(num_items)]
+
+    for idx, item in enumerate(container.items):
+        if item.position is None:
+            continue
+        x, y, z = item.position
+        l, w, h = item.get_current_dims()
+        verts = np.array([
+            [x,   y,   z],   [x+l, y,   z],   [x+l, y+w, z],   [x,   y+w, z],
+            [x,   y,   z+h], [x+l, y,   z+h], [x+l, y+w, z+h], [x,   y+w, z+h],
+        ])
+        faces = [
+            [verts[0], verts[1], verts[2], verts[3]],
+            [verts[4], verts[5], verts[6], verts[7]],
+            [verts[0], verts[1], verts[5], verts[4]],
+            [verts[2], verts[3], verts[7], verts[6]],
+            [verts[0], verts[3], verts[7], verts[4]],
+            [verts[1], verts[2], verts[6], verts[5]],
+        ]
+        ax.add_collection3d(Poly3DCollection(
+            faces, alpha=0.75, facecolor=colors[idx],
+            edgecolor='k', linewidths=0.3))
+
+    # 外边界框
+    cv = np.array([[0,0,0],[L,0,0],[L,W,0],[0,W,0],
+                   [0,0,H],[L,0,H],[L,W,H],[0,W,H]])
+    for e in ([0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
+              [0,4],[1,5],[2,6],[3,7]):
+        ax.plot3D(*cv[e].T, color='dimgray', linewidth=1.2,
+                  linestyle='--', alpha=0.5)
+
+    # 不规则轮廓约束（分层边界线，蓝色）
+    cfg = IRREGULAR_CONTAINER_CONFIGS[container.container_type]
+    for (z_start, z_end, y_min, y_max) in cfg['layers']:
+        for zz in (z_start, z_end):
+            ax.plot([0, L, L, 0, 0],
+                    [y_min, y_min, y_max, y_max, y_min],
+                    [zz] * 5,
+                    color='steelblue', linewidth=1.2, alpha=0.7)
+
+    util = container.volume_used / container.valid_volume
+    ax.set_xlim(0, L); ax.set_ylim(0, W); ax.set_zlim(0, H)
+    ax.set_xlabel('X（长）'); ax.set_ylabel('Y（宽）'); ax.set_zlabel('Z（高）')
+    ax.set_title(
+        f'装载图  监督比例 {ratio_pct}%  ·  利用率 {util:.2%}  ·  已装 {num_items} 件',
+        fontsize=12, fontweight='bold')
+    ax.view_init(elev=25, azim=45)
+    plt.tight_layout()
+
+    path = os.path.join(ratio_dir, 'loading_diagram.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  装载图   → {path}")
 
 
 # ======================================================================
