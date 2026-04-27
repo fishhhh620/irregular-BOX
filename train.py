@@ -229,6 +229,43 @@ def _run_eval_episode(model_path, excel_data, episode_id):
     return env.container
 
 
+def _yz_polygon(layers):
+    """
+    根据分层定义构建集装器 Y-Z 截面多边形顶点（顺时针）。
+
+    飘板型（AKE/pmc_F_ld）：下层窄、上层宽，右侧出现向外台阶。
+    收角型（pmc_md11f_md/pge_md11f_md）：下层宽、上层窄，两侧出现向内台阶。
+    返回 [(y, z), ...] 的封闭多边形顶点列表。
+    """
+    layers = sorted(layers, key=lambda l: l[0])
+    n = len(layers)
+    pts = []
+
+    # 底边：从左(y_min)到右(y_max)
+    pts.append((layers[0][2], layers[0][0]))
+    pts.append((layers[0][3], layers[0][0]))
+
+    # 右侧壁：由下往上，遇到 y_max 变化时插入水平台阶
+    for i in range(n):
+        z_start, z_end, _, y_max = layers[i]
+        if i > 0 and layers[i - 1][3] != y_max:
+            pts.append((y_max, z_start))   # 水平台阶
+        pts.append((y_max, z_end))
+
+    # 顶边：从右(y_max)到左(y_min)
+    pts.append((layers[-1][2], layers[-1][1]))
+
+    # 左侧壁：由上往下，遇到 y_min 变化时插入水平台阶
+    for i in range(n - 1, -1, -1):
+        z_start, z_end, y_min, _ = layers[i]
+        if i < n - 1 and layers[i + 1][2] != y_min:
+            pts.append((y_min, z_end))     # 水平台阶
+        if i > 0:
+            pts.append((y_min, z_start))
+
+    return pts
+
+
 def _save_loading_diagram(container, ratio_pct, ratio_dir):
     """将容器装载结果渲染为 3D 装载图并保存到 ratio_dir。"""
     if container is None or not container.items:
@@ -237,10 +274,28 @@ def _save_loading_diagram(container, ratio_pct, ratio_dir):
 
     L, W, H   = container.L, container.W, container.H
     num_items = len(container.items)
+    cfg       = IRREGULAR_CONTAINER_CONFIGS[container.container_type]
 
     fig = plt.figure(figsize=(14, 9))
     ax  = fig.add_subplot(111, projection='3d')
 
+    # ── 集装器实际形状（按分层多边形截面拉伸） ────────────────────────
+    yz_pts     = _yz_polygon(cfg['layers'])
+    np_yz      = len(yz_pts)
+    front_face = [[L, y, z] for y, z in yz_pts]   # x = L 面
+    back_face  = [[0, y, z] for y, z in yz_pts]   # x = 0 面
+    side_faces = []
+    for i in range(np_yz):
+        y1, z1 = yz_pts[i]
+        y2, z2 = yz_pts[(i + 1) % np_yz]
+        side_faces.append([[0, y1, z1], [L, y1, z1], [L, y2, z2], [0, y2, z2]])
+
+    ax.add_collection3d(Poly3DCollection(
+        [front_face, back_face] + side_faces,
+        alpha=0.07, facecolor='lightsteelblue',
+        edgecolor='steelblue', linewidths=1.0))
+
+    # ── 货物 ──────────────────────────────────────────────────────────
     try:
         cmap = plt.colormaps['tab20']
     except (AttributeError, KeyError):
@@ -268,26 +323,9 @@ def _save_loading_diagram(container, ratio_pct, ratio_dir):
             faces, alpha=0.75, facecolor=colors[idx],
             edgecolor='k', linewidths=0.3))
 
-    # 外边界框
-    cv = np.array([[0,0,0],[L,0,0],[L,W,0],[0,W,0],
-                   [0,0,H],[L,0,H],[L,W,H],[0,W,H]])
-    for e in ([0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
-              [0,4],[1,5],[2,6],[3,7]):
-        ax.plot3D(*cv[e].T, color='dimgray', linewidth=1.2,
-                  linestyle='--', alpha=0.5)
-
-    # 不规则轮廓约束（分层边界线，蓝色）
-    cfg = IRREGULAR_CONTAINER_CONFIGS[container.container_type]
-    for (z_start, z_end, y_min, y_max) in cfg['layers']:
-        for zz in (z_start, z_end):
-            ax.plot([0, L, L, 0, 0],
-                    [y_min, y_min, y_max, y_max, y_min],
-                    [zz] * 5,
-                    color='steelblue', linewidth=1.2, alpha=0.7)
-
-    util = container.volume_used / container.valid_volume
     ax.set_xlim(0, L); ax.set_ylim(0, W); ax.set_zlim(0, H)
     ax.set_xlabel('X（长）'); ax.set_ylabel('Y（宽）'); ax.set_zlabel('Z（高）')
+    util = container.volume_used / container.valid_volume
     ax.set_title(
         f'装载图  监督比例 {ratio_pct}%  ·  利用率 {util:.2%}  ·  已装 {num_items} 件',
         fontsize=12, fontweight='bold')
